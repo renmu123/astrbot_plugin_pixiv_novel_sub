@@ -59,8 +59,11 @@ with patch.dict(
 
 
 class FakeEvent:
+    unified_msg_origin = "bot:GroupMessage:1"
+
     def __init__(self, admin=True, sender="7"):
         self.admin, self.sender, self.stopped = admin, sender, False
+        self.sent = []
 
     def is_admin(self):
         return self.admin
@@ -73,6 +76,9 @@ class FakeEvent:
 
     def plain_result(self, text):
         return text
+
+    async def send(self, text):
+        self.sent.append(text)
 
 
 class PluginTests(unittest.IsolatedAsyncioTestCase):
@@ -87,7 +93,7 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
         self.plugin.client.fetch = self.client.fetch
         self.addAsyncCleanup(self.plugin.terminate)
 
-    async def test_only_query_tools_registered_and_permissions_enforced(self):
+    async def test_tools_registered_and_permissions_enforced(self):
         event = FakeEvent(admin=False)
         for method in (self.plugin.check_tool, self.plugin.status_tool):
             self.assertTrue(method.registration["name"].startswith("pixiv_novel_"))
@@ -96,6 +102,14 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(event.stopped)
         self.assertFalse(hasattr(self.plugin, "subscribe_tool"))
         self.assertFalse(hasattr(self.plugin, "unsubscribe_tool"))
+        self.assertIn(
+            "仅管理员",
+            await self.plugin.download_tool(
+                event, "https://www.pixiv.net/novel/show.php?id=1"
+            ),
+        )
+        self.assertIn("仅管理员", await self.plugin.download_status_tool(event))
+        self.assertFalse(self.plugin.download_jobs)
 
     async def test_whitelist_can_check_without_subscription(self):
         self.config["allowed_users"] = ["7"]
@@ -141,7 +155,8 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
         path = Path(__file__).resolve().parents[1] / "_conf_schema.json"
         schema = json.loads(path.read_text(encoding="utf-8-sig"))
         self.assertEqual(
-            set(schema), {"cookie", "network_proxy", "admin_only", "allowed_users"}
+            set(schema),
+            {"cookie", "network_proxy", "admin_only", "allowed_users", "save_path"},
         )
         self.assertTrue(schema["cookie"]["secret"])
 
@@ -150,6 +165,77 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
         await self.plugin.terminate()
         self.plugin.client.close.assert_awaited_once()
         self.assertIn("正在停止", await self.plugin.check_tool(FakeEvent()))
+
+    async def test_download_tool_runs_job_and_sends_text_completion_only(self):
+        result = plugin_module.DownloadResult(
+            Path(self.temp.name) / "作品_作者", "作品", "作者", 1
+        )
+        self.plugin.downloader.download = AsyncMock(return_value=result)
+        event = FakeEvent()
+        submitted = await self.plugin.download_tool(
+            event, "https://www.pixiv.net/novel/show.php?id=28347721"
+        )
+        self.assertIn("已提交", submitted)
+        self.assertFalse(event.stopped)
+        job = next(iter(self.plugin.download_jobs.values()))
+        await job.task
+        self.assertEqual(job.stage, "已完成")
+        self.assertEqual(len(event.sent), 1)
+        self.assertIsInstance(event.sent[0], str)
+        self.assertIn("下载完成", event.sent[0])
+        self.assertIn("metadata.json", event.sent[0])
+        self.assertIn("已完成", await self.plugin.download_status_tool(event, job.id))
+
+    async def test_failed_download_does_not_notify_completion(self):
+        self.plugin.downloader.download = AsyncMock(
+            side_effect=plugin_module.DownloadError("未返回正文")
+        )
+        event = FakeEvent()
+        await self.plugin.download_tool(
+            event, "https://www.pixiv.net/novel/show.php?id=1"
+        )
+        job = next(iter(self.plugin.download_jobs.values()))
+        await job.task
+        self.assertEqual(job.stage, "失败")
+        self.assertIn("失败", event.sent[0])
+        self.assertNotIn("下载完成", event.sent[0])
+
+    async def test_download_duplicate_submission_and_session_visibility(self):
+        pending = asyncio.Event()
+
+        async def wait(*args):
+            await pending.wait()
+
+        self.plugin.downloader.download = wait
+        event = FakeEvent()
+        await self.plugin.download_tool(event, "https://www.pixiv.net/novel/series/1")
+        self.assertIn(
+            "已有下载任务",
+            await self.plugin.download_tool(
+                event, "https://www.pixiv.net/novel/series/1"
+            ),
+        )
+        other = FakeEvent()
+        other.unified_msg_origin = "bot:GroupMessage:2"
+        self.assertIn("没有可查看", await self.plugin.download_status_tool(other))
+        job = next(iter(self.plugin.download_jobs.values()))
+        await self.plugin.terminate()
+        self.assertTrue(job.task.done())
+
+    async def test_download_command_and_configured_save_path(self):
+        destination = Path(self.temp.name) / "saved"
+        self.config["save_path"] = str(destination)
+        plugin = plugin_module.PixivNovelSubPlugin(self.context, self.config)
+        self.addAsyncCleanup(plugin.terminate)
+        self.assertEqual(plugin.download_root, destination.resolve())
+        event = FakeEvent()
+        result = [
+            item
+            async for item in plugin.download_command(event, "https://example.com/bad")
+        ]
+        self.assertTrue(event.stopped)
+        self.assertIn("请提供 Pixiv", result[0])
+        self.assertFalse(plugin.download_jobs)
 
 
 if __name__ == "__main__":

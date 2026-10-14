@@ -1,4 +1,10 @@
 {
+  "save_path": {
+    "description": "小说保存路径",
+    "type": "string",
+    "default": "",
+    "hint": "正文 TXT 和 metadata.json 的保存根目录。留空使用 data/plugin_data/astrbot_plugin_pixiv_novel_sub/downloads；支持绝对路径和 ~，相对路径以 AstrBot 工作目录为基准。修改后重新加载插件。"
+  },
   "cookie": {
     "description": "Pixiv 账号 Cookie",
     "type": "string",

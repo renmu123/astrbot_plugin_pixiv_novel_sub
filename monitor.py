@@ -128,14 +128,15 @@ class PixivClient:
             )
         return self._client
 
-    async def fetch(self) -> tuple[dict, list[dict]]:
+    async def get_json(self, path: str, params: dict, referer: str) -> dict:
+        """Request an internal Pixiv API using the configured login and proxy."""
         if not self.options.cookie:
             raise PixivError("请先在插件配置中填写 Pixiv Cookie，然后重新加载插件。")
         headers = {
             "User-Agent": USER_AGENT,
             "Accept": "application/json",
             "Accept-Language": "zh-CN,zh;q=0.9,zh-TW;q=0.8,zh-HK;q=0.7,en-US;q=0.6,en;q=0.5",
-            "Referer": REFERER,
+            "Referer": referer,
             "Cookie": self.options.cookie,
             "Sec-Fetch-Dest": "empty",
             "Sec-Fetch-Mode": "cors",
@@ -146,8 +147,8 @@ class PixivClient:
         for attempt in range(3):
             try:
                 response = await self._get_client().get(
-                    ENDPOINT,
-                    params={"p": 1, "mode": "all", "lang": "zh"},
+                    "https://www.pixiv.net" + path,
+                    params=params,
                     headers=headers,
                 )
             except httpx.HTTPError:
@@ -172,10 +173,20 @@ class PixivClient:
                 payload = response.json()
             except (ValueError, UnicodeError):
                 raise PixivError(
-                    "Pixiv 未返回有效 JSON，可能需要登录或浏览器验证；未更新上次结果。"
+                    "Pixiv 未返回有效 JSON，可能需要登录或浏览器验证。"
                 ) from None
-            return payload, parse_response(payload)
+            if not isinstance(payload, dict) or payload.get("error") is not False:
+                raise PixivError("Pixiv API 返回错误，请检查 Cookie 和作品访问权限。")
+            if not isinstance(payload.get("body"), dict):
+                raise PixivError("Pixiv 响应缺少 body 或格式异常。")
+            return payload
         raise PixivError("Pixiv 请求失败。")
+
+    async def fetch(self) -> tuple[dict, list[dict]]:
+        payload = await self.get_json(
+            "/ajax/follow_latest/novel", {"p": 1, "mode": "all", "lang": "zh"}, REFERER
+        )
+        return payload, parse_response(payload)
 
     async def close(self):
         if self._client is not None:
