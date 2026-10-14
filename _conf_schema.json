@@ -1,0 +1,44 @@
+{
+  "cookie": {
+    "description": "Pixiv 账号 Cookie",
+    "type": "string",
+    "default": "",
+    "secret": true,
+    "hint": "填写浏览器请求中 Cookie 请求头的完整值，不含 Cookie: 前缀。接口查询该 Cookie 登录账号的小说动态。修改后重新加载插件。"
+  },
+  "network_proxy": {
+    "description": "网络与代理",
+    "type": "object",
+    "items": {
+      "proxy_mode": {
+        "description": "代理模式",
+        "type": "string",
+        "default": "system",
+        "options": [
+          "system",
+          "custom",
+          "none"
+        ],
+        "hint": "system 使用环境代理；custom 使用下方地址；none 禁用环境代理。"
+      },
+      "proxy_url": {
+        "description": "自定义代理地址",
+        "type": "string",
+        "default": "",
+        "hint": "例如 http://127.0.0.1:7890 或 socks5://127.0.0.1:7890。"
+      }
+    }
+  },
+  "admin_only": {
+    "description": "仅管理员或白名单用户可操作",
+    "type": "bool",
+    "default": true,
+    "hint": "命令和 LLM 工具均遵守此设置。"
+  },
+  "allowed_users": {
+    "description": "允许操作的用户 ID",
+    "type": "list",
+    "default": [],
+    "hint": "聊天平台用户 ID，以字符串填写；管理员始终可操作。"
+  }
+}

@@ -1,0 +1,5 @@
+name: astrbot_plugin_pixiv_novel_sub
+display_name: Pixiv 小说动态检查
+desc: 通过当前 Cookie 账号查询小说动态，持久化上次响应并比较新增作品，支持命令和 LLM 工具。
+version: v1.1.0
+author: renmu
